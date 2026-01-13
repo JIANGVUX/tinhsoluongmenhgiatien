@@ -9,7 +9,7 @@ import streamlit as st
 APP_TITLE = "Tính mệnh giá phát lương (gọn: Cần lấy + Tổng hợp)"
 
 # Mệnh giá theo yêu cầu (VND)
-DENOMS_VND = [500_000, 100_000, 50_000, 30_000, 20_000, 10_000, 5_000, 2_000, 1_000]
+DENOMS_VND = [500_000, 100_000, 50_000, 20_000, 10_000, 5_000, 2_000, 1_000]
 
 
 # =========================
