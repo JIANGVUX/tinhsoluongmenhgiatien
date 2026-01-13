@@ -241,129 +241,47 @@ except Exception as e:
 col_map = {c: str(c).strip() for c in df_pay.columns}
 df_pay = df_pay.rename(columns=col_map)
 
-need_pay = ["Stt", "Mã NV", "Họ và tên", "Tổng lương", "Ứng lương", "Còn được nhận", "Lương Tay"]
-missing = [c for c in need_pay if c not in df_pay.columns]
-if missing:
-    st.error(f"Thiếu cột bắt buộc trong sheet bảng lương: {missing}\n"
-             f"Bạn cần có tối thiểu các cột: {need_pay}")
-    st.stop()
+# Chuẩn hoá tên cột (bỏ khoảng trắng thừa)
+df_pay.columns = [str(c).strip() for c in df_pay.columns]
 
-# bỏ dòng tổng: STT phải là số
-df_pay["_stt_num"] = pd.to_numeric(df_pay["Stt"], errors="coerce")
-df_pay = df_pay[df_pay["_stt_num"].notna()].copy()
-
-# =========================
-# 2) Đọc sheet ứng lương
-# =========================
-try:
-    df_adv_raw = pd.read_excel(uploaded, sheet_name=adv_sheet, dtype=object)
-except Exception as e:
-    st.error(f"Lỗi đọc sheet ứng lương: {e}")
-    st.stop()
-
-# auto-detect cột tên + tổng ứng (nhưng vẫn cho chọn nếu muốn chắc)
-def find_col_by_keywords(df: pd.DataFrame, keywords: List[str]) -> str:
-    cols = list(df.columns)
-    norm_cols = {c: normalize_text(c) for c in cols}
-    for c in cols:
-        n = norm_cols[c]
-        if any(k in n for k in keywords):
+def find_col(df: pd.DataFrame, keywords: list[str]) -> str:
+    for c in df.columns:
+        nc = normalize_text(c)
+        if any(k in nc for k in keywords):
             return c
     return ""
 
-name_guess = find_col_by_keywords(df_adv_raw, ["ho va ten", "hoten", "ten", "nhan vien"])
-amt_guess = find_col_by_keywords(df_adv_raw, ["tong ung", "ung luong", "so tien ung", "ung"])
-
-st.subheader("0) Chọn đúng cột trong sheet ung_luong (để khớp 100%)")
-cc1, cc2 = st.columns(2)
-with cc1:
-    adv_name_col = st.selectbox("Cột TÊN trong ung_luong", options=list(df_adv_raw.columns), index=(list(df_adv_raw.columns).index(name_guess) if name_guess in df_adv_raw.columns else 0))
-with cc2:
-    adv_amt_col = st.selectbox("Cột TỔNG ỨNG trong ung_luong", options=list(df_adv_raw.columns), index=(list(df_adv_raw.columns).index(amt_guess) if amt_guess in df_adv_raw.columns else 0))
-
-df_adv = df_adv_raw[[adv_name_col, adv_amt_col]].copy()
-df_adv = df_adv.rename(columns={adv_name_col: "Họ và tên", adv_amt_col: "Tổng ứng"})
-
-# parse tiền ứng
-adv_amounts, adv_notes = [], []
-for v in df_adv["Tổng ứng"].tolist():
-    val, note = parse_money_to_int_vnd(v)
-    adv_amounts.append(val)
-    adv_notes.append(note)
-df_adv["_adv_vnd"] = adv_amounts
-df_adv["_adv_note"] = adv_notes
-
-# =========================
-# 3) ĐỐI CHIẾU KHỚP 100% (theo Họ và tên đã normalize)
-# =========================
-df_pay["_key"] = df_pay["Họ và tên"].apply(normalize_text)
-df_adv["_key"] = df_adv["Họ và tên"].apply(normalize_text)
-
-# check duplicate keys
-dup_pay = df_pay[df_pay["_key"].duplicated(keep=False)]["_key"].unique().tolist()
-dup_adv = df_adv[df_adv["_key"].duplicated(keep=False)]["_key"].unique().tolist()
-if dup_pay or dup_adv:
-    st.error("❌ LỖI TRÙNG NHÂN VIÊN (không thể khớp 100% vì có trùng khóa tên).")
-    if dup_pay:
-        st.write("Trùng trong HỢP CHÍ:", dup_pay)
-    if dup_adv:
-        st.write("Trùng trong ung_luong:", dup_adv)
+# Bắt buộc phải có các cột chính
+must_cols = {
+    "Stt": find_col(df_pay, ["stt"]),
+    "Mã NV": find_col(df_pay, ["ma nv", "manv"]),
+    "Họ và tên": find_col(df_pay, ["ho va ten", "hoten", "ten"]),
+    "Tổng lương": find_col(df_pay, ["tong luong"]),
+    "Ứng lương": find_col(df_pay, ["ung luong"]),
+    "Còn được nhận": find_col(df_pay, ["con duoc nhan"]),
+}
+missing = [k for k, v in must_cols.items() if not v]
+if missing:
+    st.error(f"Thiếu cột bắt buộc trong sheet bảng lương: {missing}")
     st.stop()
 
-pay_keys = set(df_pay["_key"].tolist())
-adv_keys = set(df_adv["_key"].tolist())
-not_found = sorted(list(adv_keys - pay_keys))
-
-if not_found:
-    st.error("❌ LỖI KHÔNG KHỚP 100%: Có nhân viên trong ung_luong KHÔNG TỒN TẠI trong HỢP CHÍ. DỪNG XỬ LÝ.")
-    show = df_adv[df_adv["_key"].isin(not_found)][["Họ và tên", "_adv_vnd", "_adv_note"]].copy()
-    st.dataframe(show, use_container_width=True, height=300)
+# Cột Lương tay (1 = trả tay)
+cash_col = find_col(df_pay, ["luong tay", "luongtay"])
+if not cash_col:
+    st.error("Không tìm thấy cột 'Lương tay' trong sheet HỢP CHÍ. Bạn hãy thêm cột này (đúng hàng tiêu đề) và upload lại file.")
     st.stop()
 
-# map tiền ứng vào bảng lương
-adv_map = dict(zip(df_adv["_key"], df_adv["_adv_vnd"]))
-df_pay["_ung_goc_parse"], _ = zip(*[parse_money_to_int_vnd(x) for x in df_pay["Ứng lương"].tolist()])
-df_pay["Ứng lương"] = df_pay["_key"].map(adv_map).fillna(0).astype(int)
+# Rename về chuẩn để code phía dưới chạy đồng nhất
+df_pay = df_pay.rename(columns={v: k for k, v in must_cols.items()})
+df_pay = df_pay.rename(columns={cash_col: "Lương tay"})
 
-# parse Tổng lương
-pay_total_vals, pay_total_notes = [], []
-for v in df_pay["Tổng lương"].tolist():
-    val, note = parse_money_to_int_vnd(v)
-    pay_total_vals.append(val)
-    pay_total_notes.append(note)
-df_pay["_tong_luong_vnd"] = pay_total_vals
-df_pay["_tong_note"] = pay_total_notes
+# Debug cực nhanh để bạn nhìn là biết app đã nhận đúng chưa
+st.caption(f"✅ Đã nhận cột lương tay: **{cash_col}**")
 
-# tính Còn được nhận = Tổng lương - Ứng lương (CHUẨN vì pandas không chạy công thức excel)
-df_pay["Còn được nhận (tính)"] = (df_pay["_tong_luong_vnd"].astype(int) - df_pay["Ứng lương"].astype(int)).astype(int)
+# Lương tay = 1
+df_pay["_is_cash"] = df_pay["Lương tay"].apply(is_cash_flag)
+st.caption(f"✅ Số người Lương tay = 1: **{int(df_pay['_is_cash'].sum())}**")
 
-# validate không âm
-neg = df_pay[df_pay["Còn được nhận (tính)"] < 0][["Mã NV", "Họ và tên", "_tong_luong_vnd", "Ứng lương", "Còn được nhận (tính)"]]
-if len(neg) > 0:
-    st.error("❌ LỖI: Có người có Còn được nhận (tính) < 0 (Tổng lương - Ứng lương âm). DỪNG XỬ LÝ.")
-    st.dataframe(neg, use_container_width=True, height=260)
-    st.stop()
-
-# rounding
-used_list, rem_list = [], []
-for amt in df_pay["Còn được nhận (tính)"].astype(int).tolist():
-    u, r = round_to_1000(int(amt), rounding_mode)
-    used_list.append(u)
-    rem_list.append(r)
-df_pay["_money_used"] = used_list
-df_pay["_remainder"] = rem_list
-
-# flag lương tay
-def is_cash_flag(x) -> bool:
-    if pd.isna(x):
-        return False
-    s = str(x).strip()
-    try:
-        return int(float(s)) == 1
-    except Exception:
-        return s == "1"
-
-df_pay["_is_cash"] = df_pay["Lương Tay"].apply(is_cash_flag)
 
 # =========================
 # 4) Tách danh sách: CHUYỂN KHOẢN vs TRẢ TIỀN MẶT
