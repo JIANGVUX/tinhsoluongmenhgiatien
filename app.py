@@ -318,11 +318,18 @@ styled = ui.style.applymap(bold_text, subset=["Cần lấy", "Tổng số tờ"]
 st.dataframe(styled, use_container_width=True, height=560)
 
 # =========================
-# 3) Tổng hợp số tờ cần chuẩn bị
+# 3) Tổng hợp số tờ cần chuẩn bị (ĐẾM TỔNG TỪNG MỆNH GIÁ)
 # =========================
-st.subheader("3) Tổng hợp số tờ cần chuẩn bị (theo danh sách đang lọc)")
+st.subheader("3) Tổng hợp số tờ cần chuẩn bị (đếm tổng từng mệnh giá)")
+
+# Tính tổng số tờ theo từng mệnh giá
 sum_notes = {lab: int(out[lab].sum()) for lab in labels}
 
+# Dòng hiển thị nhanh: 500k:xx | 100k:yy | ...
+quick_line = " | ".join([f"{lab}: {sum_notes[lab]}" for lab in labels])
+st.markdown(f"**Tổng số lượng theo mệnh giá:** {quick_line}")
+
+# Bảng tổng hợp chi tiết
 summary_rows = []
 for d, lab in zip(DENOMS_VND, labels):
     summary_rows.append({
@@ -332,21 +339,23 @@ for d, lab in zip(DENOMS_VND, labels):
     })
 
 df_summary = pd.DataFrame(summary_rows)
-df_summary.loc[len(df_summary)] = {
-    "Mệnh giá": "TỔNG",
-    "Số tờ": int(df_summary["Số tờ"].sum()),
-    "Thành tiền (VND)": int(df_summary["Thành tiền (VND)"].sum())
-}
 
+# Hàng tổng
+total_notes = int(df_summary["Số tờ"].sum())
+total_money = int(df_summary["Thành tiền (VND)"].sum())
+df_summary.loc[len(df_summary)] = {"Mệnh giá": "TỔNG", "Số tờ": total_notes, "Thành tiền (VND)": total_money}
+
+# KPI nhanh
 c1, c2, c3 = st.columns(3)
 with c1:
     st.metric("Tổng người", len(ui))
 with c2:
-    st.metric("Tổng số tờ", int(df_summary.loc[df_summary["Mệnh giá"] == "TỔNG", "Số tờ"].iloc[0]))
+    st.metric("Tổng số tờ", total_notes)
 with c3:
-    st.metric("Tổng tiền (VND)", int(df_summary.loc[df_summary["Mệnh giá"] == "TỔNG", "Thành tiền (VND)"].iloc[0]))
+    st.metric("Tổng tiền (VND)", total_money)
 
 st.dataframe(df_summary, use_container_width=True, height=380)
+
 
 # =========================
 # 4) Download Excel (2 sheet)
